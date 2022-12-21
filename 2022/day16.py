@@ -1,19 +1,23 @@
 import re
-from itertools import chain, pairwise, tee
-from heapq import heappop, heappush, heapify
-from utils import timing, cumsum
+from itertools import combinations, permutations, chain
+from collections import namedtuple
+from heapq import heappop, heappush
+from utils import timing
 
 
 def solve(data):
-    data = example
+    # data = example
     start = "AA"
-    rates, graph = parse_data(data)
-    distance_matrix = calculate_distance_matrix(graph)
+    distance_matrix, rates = parse_data(data)
+    print(f"Searching {len(rates)} valves")
+    if len(rates) < 11:
+        with timing("Brute force"):
+            bf = brute_force(start, distance_matrix, rates)
+            print(bf)
     with timing("Branch and bound search"):
-        p1, _ = branch_and_bound(start, distance_matrix, rates)
-
-    with timing("With elephant"):
-        p2, _ = with_elephant(start, distance_matrix, rates)
+        p1 = single_agent(start, distance_matrix, rates)
+    with timing("Branch and bound search for two agents"):
+        p2 = double_agent(start, distance_matrix, rates)
 
     return p1, p2
 
@@ -30,89 +34,116 @@ def parse_data(data):
         name, rate, ns = mo.groups()
         rates[name] = int(rate)
         graph[name] = ns.split(", ")
-    return rates, graph
+    rates = {v: r for v, r in rates.items() if r > 0}
+    distance_matrix = calculate_distance_matrix(graph)
+    return distance_matrix, rates
 
 
-def timestamps_for_route(start, route, distance_matrix):
-    return cumsum(
-        distance_matrix[src][dest] + 1 for src, dest in pairwise(chain([start], route))
+def brute_force(start, distance_matrix, rates):
+    limit = 30
+    valves = rates.keys()
+
+    def pressure_released(route):
+        ts = (
+            1 + distance_matrix[src][dest]
+            for src, dest in zip(chain([start], route), route)
+        )
+        rs = (rates[v] for v in route)
+        t = 0
+        p = 0
+        for r, dt in zip(rs, ts):
+            t += dt
+            if not t < limit:
+                break
+            p += r * (limit - t)
+        return p
+
+    p_max = 0
+    optimal = None
+    for route in permutations(valves):
+        p = pressure_released(route)
+        if p > p_max:
+            p_max = p
+            optimal = route
+    return p_max, optimal
+
+
+def partitions(s):
+    """Return all possible ways of splitting s in half"""
+    r = len(s) // 2
+    ps = set()
+    for c in combinations(s, r):
+        a = frozenset(c)
+        b = s - a
+        ps.add(frozenset((a, b)))
+    return ps
+
+
+def double_agent(start, distance_matrix, rates):
+    limit = 26
+    valves = frozenset(rates.keys())
+    return max(
+        sum(
+            single_agent(start, distance_matrix, rs, limit)
+            for rs in ({v: r for v, r in rates.items() if v in p} for p in ps)
+        )
+        for ps in partitions(valves)
     )
 
 
-def reward_for_route(start, route, timestamps, rates, limit):
-    return sum((limit - t) * rates[v] for t, v in zip(timestamps, route) if t < limit)
+def single_agent(start, distance_matrix, rates, limit=30):
+    sorted_rates = sorted(((r, v) for v, r in rates.items()), reverse=True)
+    valves = frozenset(v for v, r in rates.items() if r > 0)
 
+    Solution = namedtuple(
+        "Solution",
+        "total_pressure_released current_valve current_time remaining_valves path",
+    )
 
-def branch_and_bound(start, distance_matrix, rates):
-    valves = set(v for v, r in rates.items() if r > 0)
-    limit = 30
+    initial = Solution(
+        total_pressure_released=0,
+        current_valve=start,
+        current_time=0,
+        remaining_valves=valves,
+        # path is only included for debugging purposes,
+        # it is not needed for the algorithm to work
+        path=[],
+    )
 
-    def reward(route):
-        timestamps = timestamps_for_route(start, route, distance_matrix)
-        return reward_for_route(start, route, timestamps, rates, limit)
+    def reward(solution):
+        return solution.total_pressure_released
 
-    def branch(route):
-        visited_nodes = set(route)
-        for v in valves - visited_nodes:
-            yield route + [v]
-
-    def bound(route):
-        timestamps = timestamps_for_route(start, route, distance_matrix)
-        r0 = reward_for_route(start, route, timestamps, rates, limit)
-        t0 = max(timestamps, default=0)
-        ts = range(t0 + 2, limit, 2)
-        rs = sorted((r for v, r in rates.items() if v not in route), reverse=True)
-        r1 = sum((limit - t) * r for t, r in zip(ts, rs) if t < limit)
-        return r0 + r1
-
-    return _branch_and_bound(reward, branch, bound)
-
-
-def with_elephant(start, distance_matrix, rates):
-    valves = set(v for v, r in rates.items() if r > 0)
-    limit = 26
-
-    def reward(routes):
-        timestamps = [
-            timestamps_for_route(start, route, distance_matrix) for route in routes
-        ]
-        return sum(
-            reward_for_route(start, r, t, rates, limit)
-            for r, t in zip(routes, timestamps)
-        )
-
-    def branch(routes):
-        a, b = routes if routes else ([], [])
-        visited_nodes = set(chain(*routes))
-        for v in valves - visited_nodes:
-            yield [a + [v], b]
-            yield [a, b + [v]]
-
-    def bound(routes):
-        timestamps = [
-            timestamps_for_route(start, route, distance_matrix) for route in routes
-        ]
-        r0 = sum(
-            reward_for_route(start, r, t, rates, limit)
-            for r, t in zip(routes, timestamps)
-        )
-        visited_nodes = set(chain(*routes))
-        rs = sorted(
-            (r for v, r in rates.items() if v not in visited_nodes), reverse=True
-        )
-        ts = list(sorted(map(lambda ts: max(ts, default=0), timestamps)))
-        for r in rs:
-            t = heappop(ts) + 2
-            heappush(ts, t)
+    def branch(solution):
+        for v in solution.remaining_valves:
+            dt = 1 + distance_matrix[solution.current_valve][v]
+            t = solution.current_time + dt
             if t < limit:
-                r0 += (limit - t) * r
-        return r0
+                dp = rates[v] * (limit - t)
+                p = solution.total_pressure_released + dp
+                vs = frozenset(x for x in solution.remaining_valves if x != v)
+                h = solution.path.copy()
+                h.append(v)
+                yield Solution(
+                    total_pressure_released=p,
+                    current_valve=v,
+                    current_time=t,
+                    remaining_valves=vs,
+                    path=h,
+                )
 
-    return _branch_and_bound(reward, branch, bound)
+    def bound(solution):
+        rs = (r for r, v in sorted_rates if v in solution.remaining_valves)
+        t0 = solution.current_time + 2
+        ts = range(t0, limit, 2)
+        p = sum(r * (limit - t) for r, t in zip(rs, ts))
+        return solution.total_pressure_released + p
+
+    solution = branch_and_bound(initial, reward, branch, bound)
+    return solution.total_pressure_released
 
 
-def _branch_and_bound(reward, branch, bound):
-    N, R = [], 0
+def branch_and_bound(initial, reward, branch, bound):
+    N, R = initial, reward(initial)
     heap = [(-R, N)]
     while heap:
         _, n = heappop(heap)
@@ -121,9 +152,9 @@ def _branch_and_bound(reward, branch, bound):
             N, R = n, r
         for m in branch(n):
             b = bound(m)
-            if b >= R:
+            if b > R:
                 heappush(heap, (-b, m))
-    return R, N
+    return N
 
 
 def calculate_distance_matrix(graph):

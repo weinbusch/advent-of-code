@@ -1,13 +1,14 @@
 import os
+import sys
 import importlib.util
 from pathlib import Path
 from utils import timing
 
 
-def main():
+def main(most_recent_only=True):
     filepaths = list(reversed(sorted(get_filepaths(), key=os.path.getmtime)))
     solvers = collect_solvers(filepaths)
-    run_solvers(solvers, most_recent_only=True)
+    run_solvers(solvers, most_recent_only=most_recent_only)
 
 
 def get_filepaths():
@@ -38,11 +39,10 @@ def run_solvers(solvers, pattern="", most_recent_only=False):
         if solver.__module__.startswith(pattern):
             name = solver.__module__
             data = read_input(f)
-            print("\n=====\n")
-            print(name)
-            print()
             with timing():
                 result = solver(data)
+                print("\n=====\n")
+                print(name)
                 if result:
                     p1, p2 = result
                     print(p1)
@@ -63,4 +63,5 @@ def read_input(path):
 
 
 if __name__ == "__main__":
-    main()
+    most_recent_only = "-a" not in sys.argv
+    main(most_recent_only)
