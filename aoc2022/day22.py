@@ -52,18 +52,25 @@ class Player:
     self.walls, self.row_boundaries, self.column_boundaries = world
     self.facing = 0
     self.x, self.y = (self.row_boundaries[0][0], 0)
- 
+    self.m = self.get_adjacency_matrix()
+    
+  def get_adjacency_matrix(self):
+    m = dict()
+    for y, (x0, k) in enumerate(self.row_boundaries):
+      for x in range(x0, x0 + k):
+        y0, l = self.column_boundaries[x]
+        neighbors = [
+          (move(x, 1, x0, k), y),
+          (x, move(y, 1, y0, l)),
+          (move(x, -1, x0, k), y),
+          (x, move(y, -1, y0, l)),
+        ]
+        m[(x, y)] = neighbors
+    return m
+
   def move(self):
     # Facing is 0 for right (>), 1 for down (v), 2 for left (<), and 3 for up (^).
-    x, y = self.x, self.y
-    if self.facing == 0:
-      x = self.move_horizontally(1)
-    elif self.facing == 1:
-      y = self.move_vertically(1)
-    elif self.facing == 2:
-      x = self.move_horizontally(-1)
-    elif self.facing == 3:
-      y = self.move_vertically(-1)
+    x, y = self.m[(self.x, self.y)][self.facing]
     if (x, y) in self.walls:
       raise WallCollision
     self.x, self.y = x, y
@@ -73,14 +80,6 @@ class Player:
 
   def turn_right(self):
     self.facing = (self.facing + 1) % 4
-
-  def move_horizontally(self, dx):
-    x0, k = self.row_boundaries[self.y]
-    return move(self.x, dx, x0, k)
-
-  def move_vertically(self, dy):
-    y0, k = self.column_boundaries[self.x]
-    return move(self.y, dy, y0, k)
 
   def go(self, instruction):
     if instruction.isdigit():
