@@ -1,5 +1,3 @@
-from pprint import pprint
-
 example = """
 addx 15
 addx -11

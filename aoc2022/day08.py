@@ -1,6 +1,3 @@
-from itertools import chain
-
-
 def solve(data):
     forest = [[int(h) for h in line] for line in data.splitlines()]
     trees = [[(x, y, h) for y, h in enumerate(line)] for x, line in enumerate(forest)]
